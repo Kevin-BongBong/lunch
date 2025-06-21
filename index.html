@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <title>점심메뉴 룰렛</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <style>
+        :root {
+            --wheel-size: 500px;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: #f4f6fa;
+            font-family: "Pretendard", sans-serif;
+        }
+        h1 { margin-bottom: 1rem; }
+
+        .wheel-container {
+            position: relative;
+            width: var(--wheel-size);
+            height: var(--wheel-size);
+            margin-bottom: 3rem;
+        }
+        canvas#wheel {
+            width: 100%;
+            height: 100%;
+            display: block;
+            border-radius: 50%;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+        /* Pointer (삼각형) : 안쪽(바퀴 방향)으로 향하게 */
+        .pointer {
+            position: absolute;
+            top: -8px;               /* 살짝 위로 올려 베이스(빨간 부분)만 살짝 겹치도록 */
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 16px solid transparent;
+            border-right: 16px solid transparent;
+            border-top: 24px solid #ff4757; /* ▶️ apex 가 아래(바퀴 중심) 를 향함 */
+            filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.2));
+            pointer-events: none;
+        }
+        button#spinBtn {
+            padding: 0.75rem 2rem;
+            font-size: 1.125rem;
+            background: #1e90ff;
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        button#spinBtn:hover { background: #1c7dd8; }
+
+        #result {
+            margin-top: 1.5rem;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #333;
+            min-height: 2.5rem;
+            text-align: center;
+        }
+
+        /* 반응형: 화면이 600px 미만이면 바퀴 축소 */
+        @media (max-width: 600px) {
+            :root { --wheel-size: 80vw; }
+        }
+    </style>
+</head>
+<body>
+    <h1>오늘 점심 뭐 먹지? 🍽️</h1>
+
+    <div class="wheel-container">
+        <canvas id="wheel" width="500" height="500"></canvas>
+        <div class="pointer"></div>
+    </div>
+
+    <button id="spinBtn">돌려!</button>
+    <div id="result"></div>
+
+    <script>
+        // ===== 설정 =====
+        const menuItems = [
+            "김치찌개",
+            "제육볶음",
+            "비빔밥",
+            "돈까스",
+            "칼국수",
+            "짜장면",
+            "초밥",
+            "샐러드"
+        ];
+
+        // ===== 변수 및 캔버스 세팅 =====
+        const wheelCanvas  = document.getElementById("wheel");
+        const ctx          = wheelCanvas.getContext("2d");
+        const spinBtn      = document.getElementById("spinBtn");
+        const resultDiv    = document.getElementById("result");
+
+        const size        = wheelCanvas.width; // 500
+        const center      = size / 2;
+        const sliceAngle  = (2 * Math.PI) / menuItems.length;
+        const pointerDeg  = 270; // 화면 상단(북쪽)
+
+        // ===== 그리기 =====
+        function drawWheel() {
+            ctx.clearRect(0, 0, size, size);
+            ctx.save();
+            ctx.translate(center, center);
+
+            for (let i = 0; i < menuItems.length; i++) {
+                // 파이 채우기 (HSL)
+                ctx.fillStyle = `hsl(${(i * 360) / menuItems.length}, 70%, 60%)`;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, center, i * sliceAngle, (i + 1) * sliceAngle);
+                ctx.closePath();
+                ctx.fill();
+                // 테두리
+                ctx.strokeStyle = "#fff";
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // 텍스트
+                const angle = i * sliceAngle + sliceAngle / 2;
+                const textRadius = center * 0.65;
+                const x = Math.cos(angle) * textRadius;
+                const y = Math.sin(angle) * textRadius;
+
+                ctx.save();
+                ctx.translate(x, y);
+                // 텍스트 거꾸로 방지 (180도 이상일 때 뒤집기)
+                const normalized = (angle + 2 * Math.PI) % (2 * Math.PI);
+                if (normalized > Math.PI / 2 && normalized < (3 * Math.PI) / 2) {
+                    ctx.rotate(angle + Math.PI); // 뒤집기
+                } else {
+                    ctx.rotate(angle);
+                }
+                ctx.fillStyle = "#333";
+                ctx.font = "bold 18px Pretendard";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(menuItems[i], 0, 0);
+                ctx.restore();
+            }
+            ctx.restore();
+        }
+        drawWheel();
+
+        // ===== 회전 로직 =====
+        let isSpinning       = false;
+        let currentRotation  = 0; // 누적 (deg)
+
+        function spinWheel() {
+            if (isSpinning) return;
+            isSpinning = true;
+            resultDiv.textContent = "";
+
+            const selectedIndex = Math.floor(Math.random() * menuItems.length);
+            const sliceDeg      = 360 / menuItems.length;
+            const targetDeg     = selectedIndex * sliceDeg + sliceDeg / 2; // 선택 파이 중심각
+
+            // 현재 회전값과 목표값 차이 계산 → pointerDeg 위치로 맞추기
+            const offset = (pointerDeg - (targetDeg + currentRotation) % 360 + 360) % 360;
+            const extraSpins = 6; // 더 돌릴 바퀴 수
+            const totalRotation = extraSpins * 360 + offset;
+            const finalRotation = currentRotation + totalRotation;
+
+            gsap.to(wheelCanvas, {
+                rotation: finalRotation,
+                duration: 5,
+                ease: "power4.out",
+                onUpdate: () => drawWheel(), // 회전 변형 대비 즉시 redraw
+                onComplete: () => {
+                    isSpinning = false;
+                    currentRotation = finalRotation % 360;
+                    resultDiv.textContent = `오늘은 \u201C${menuItems[selectedIndex]}\u201D! 맛있게 드세요 🍽️`;
+                }
+            });
+        }
+        spinBtn.addEventListener("click", spinWheel);
+    </script>
+</body>
+</html>
